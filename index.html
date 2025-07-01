@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Správa áut</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <style>
+    body { padding: 2rem; background-color: #f8f9fa; }
+    h1, h2 { margin-bottom: 1rem; }
+    .card { margin-top: 1.5rem; }
+    .tab-content { margin-top: 2rem; }
+    canvas { max-width: 100%; height: auto; } /* Pre responzivitu grafu */
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="text-center">Správa áut</h1>
+
+    <div class="mb-3">
+      <label for="autoSelect" class="form-label">Vyber auto:</label>
+      <select id="autoSelect" class="form-select"></select>
+      <button class="btn btn-sm btn-outline-secondary mt-2" id="spravaAutBtn">⚙️ Správa auta</button>
+      <button class="btn btn-sm btn-outline-primary mt-2" id="pridatAutoBtn">➕ Pridať auto</button>
+      <button class="btn btn-sm btn-outline-danger mt-2" id="resetDataBtn">🗑️ Resetovať všetky dáta</button>
+    </div>
+
+    <ul class="nav nav-tabs" id="tabMenu" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="spotreba-tab" data-bs-toggle="tab" data-bs-target="#spotreba" type="button" role="tab">Spotreba</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="servis-tab" data-bs-toggle="tab" data-bs-target="#servis" type="button" role="tab">Údržba</button>
+      </li>
+    </ul>
+
+    <div class="tab-content">
+      <div class="tab-pane fade show active" id="spotreba" role="tabpanel">
+        <form id="tankovanieForm" class="mt-3">
+          <div class="row g-3">
+            <div class="col-md-2">
+              <input type="date" id="datum" class="form-control" required>
+            </div>
+            <div class="col-md-2">
+              <input type="number" id="km" class="form-control" placeholder="Stav km" required min="0">
+            </div>
+            <div class="col-md-2">
+              <input type="number" id="litre" class="form-control" placeholder="Litrov" required step="0.01" min="0">
+            </div>
+            <div class="col-md-2">
+              <input type="number" id="cenaZaL" class="form-control" placeholder="Cena/L (€)" required step="0.001" min="0">
+            </div>
+            <div class="col-md-4">
+              <button type="submit" class="btn btn-success w-100">Pridať záznam</button>
+            </div>
+          </div>
+        </form>
+        <div class="mt-2 text-end">
+          <input type="file" id="importTankovanieFile" accept=".csv" style="display: none;">
+          <button id="importTankovanieBtn" class="btn btn-sm btn-outline-dark me-2">⬆️ Import tankovania CSV</button>
+          <button id="exportTankovanieBtn" class="btn btn-sm btn-outline-dark">⬇️ Export tankovania CSV</button>
+        </div>
+        <table class="table table-striped mt-3">
+          <thead>
+            <tr><th>Dátum</th><th>Km</th><th>Litrov</th><th>Cena/L</th><th>Cena (€)</th><th>Spotreba (l/100km)</th><th></th></tr>
+          </thead>
+          <tbody id="zaznamyBody"></tbody>
+        </table>
+
+        <div class="mt-4">
+            <h3>Graf spotreby</h3>
+            <canvas id="spotrebaChart"></canvas>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="servis" role="tabpanel">
+        <form id="servisForm" class="mt-3">
+          <div class="row g-3">
+            <div class="col-md-3">
+              <input type="date" id="servisDatum" class="form-control" required>
+            </div>
+            <div class="col-md-3">
+              <input type="number" id="servisKm" class="form-control" placeholder="Stav km" required min="0">
+            </div>
+            <div class="col-md-4">
+              <input type="text" id="servisPopis" class="form-control" placeholder="Popis servisu" required>
+            </div>
+            <div class="col-md-2">
+              <button type="submit" class="btn btn-info w-100">Pridať servis</button>
+            </div>
+          </div>
+        </form>
+        <div class="mt-2 text-end">
+          <input type="file" id="importServisFile" accept=".csv" style="display: none;">
+          <button id="importServisBtn" class="btn btn-sm btn-outline-dark me-2">⬆️ Import servis CSV</button>
+          <button id="exportServisBtn" class="btn btn-sm btn-outline-dark">⬇️ Export servis CSV</button>
+        </div>
+        <table class="table table-striped mt-3">
+          <thead>
+            <tr><th>Dátum</th><th>Km</th><th>Popis</th><th></th></tr>
+          </thead>
+          <tbody id="servisBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    let data = {};
+    let aktualneAuto = '';
+    let spotrebaChartInstance = null; // Pre uloženie inštancie grafu
+
+    const autoSelect = document.getElementById('autoSelect');
+    const zaznamyBody = document.getElementById('zaznamyBody');
+    const servisBody = document.getElementById('servisBody');
+    const tankovanieForm = document.getElementById('tankovanieForm');
+    const servisForm = document.getElementById('servisForm');
+
+    const pridatAutoBtn = document.getElementById('pridatAutoBtn');
+    const spravaAutBtn = document.getElementById('spravaAutBtn');
+    const resetDataBtn = document.getElementById('resetDataBtn');
+    const importTankovanieBtn = document.getElementById('importTankovanieBtn');
+    const exportTankovanieBtn = document.getElementById('exportTankovanieBtn');
+    const importServisBtn = document.getElementById('importServisBtn');
+    const exportServisBtn = document.getElementById('exportServisBtn');
+    const importTankovanieFile = document.getElementById('importTankovanieFile'); // Získame referenciu na file input
+    const importServisFile = document.getElementById('importServisFile'); // Získame referenciu na file input
+
+    document.addEventListener('DOMContentLoaded', () => {
+      nacitajData();
+      inicializujAplikaciu();
+      priradEventListeners();
+    });
+
+    function nacitajData() {
+      try {
+        const storedData = localStorage.getItem('autaData');
+        data = storedData ? JSON.parse(storedData) : {};
+        const storedAuto = localStorage.getItem('aktualneAuto');
+        aktualneAuto = storedAuto || '';
+      } catch (e) {
+        console.error("Chyba pri načítaní dát z Local Storage:", e);
+        data = {};
+        aktualneAuto = '';
+        ulozData();
+        alert("Nastala chyba pri načítaní uložených dát. Dáta boli resetované.");
+      }
+    }
+
+    function ulozData() {
+      localStorage.setItem('autaData', JSON.stringify(data));
+      localStorage.setItem('aktualneAuto', aktualneAuto);
+    }
+
+    function inicializujAplikaciu() {
+      const autaKeys = Object.keys(data);
+
+      if (autaKeys.length > 0) {
+        if (!aktualneAuto || !autaKeys.includes(aktualneAuto)) {
+          aktualneAuto = autaKeys[0];
+          ulozData();
+        }
+      } else {
+        aktualneAuto = '';
+        ulozData();
+      }
+      zobrazVyberAut();
+      zobrazZaznamy();
+      zobrazServis();
+    }
+
+    function priradEventListeners() {
+      pridatAutoBtn.addEventListener('click', pridatAuto);
+      spravaAutBtn.addEventListener('click', spravaAut);
+      resetDataBtn.addEventListener('click', resetData);
+
+      importTankovanieBtn.addEventListener('click', () => importTankovanieFile.click());
+      exportTankovanieBtn.addEventListener('click', () => exportCSV('tankovania'));
+      importServisBtn.addEventListener('click', () => importServisFile.click());
+      exportServisBtn.addEventListener('click', () => exportCSV('servis'));
+
+      autoSelect.addEventListener('change', () => {
+        aktualneAuto = autoSelect.value;
+        ulozData();
+        zobrazZaznamy();
+        zobrazServis();
+      });
+
+      tankovanieForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        if (!aktualneAuto) {
+          alert("Najprv vyberte alebo pridajte auto, do ktorého chcete pridať záznam.");
+          return;
+        }
+        const datum = document.getElementById('datum').value;
+        const km = parseInt(document.getElementById('km').value);
+        const litre = parseFloat(document.getElementById('litre').value);
+        const cenaZaL = parseFloat(document.getElementById('cenaZaL').value); // Získanie ceny za liter
+
+        if (isNaN(km) || isNaN(litre) || isNaN(cenaZaL) || km < 0 || litre < 0 || cenaZaL < 0) {
+          alert("Skontrolujte zadané hodnoty pre kilometre, litre a cenu za liter. Musia byť kladné čísla.");
+          return;
+        }
+
+        const cenaTankovania = (litre * cenaZaL).toFixed(2); // Výpočet celkovej ceny tankovania
+
+        if (!data[aktualneAuto].tankovania) {
+          data[aktualneAuto].tankovania = [];
+        }
+        // Ukladáme aj cenu za liter do dát
+        data[aktualneAuto].tankovania.push({ datum, km, litre, cenaZaL, cenaTankovania });
+        ulozData();
+        zobrazZaznamy();
+        this.reset();
+      });
+
+      servisForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        if (!aktualneAuto) {
+          alert("Najprv vyberte alebo pridajte auto, do ktorého chcete pridať záznam.");
+          return;
+        }
+        const datum = document.getElementById('servisDatum').value;
+        const km = parseInt(document.getElementById('servisKm').value);
+        const popis = document.getElementById('servisPopis').value;
+
+        if (isNaN(km) || km < 0) {
+          alert("Skontrolujte zadanú hodnotu pre kilometre. Musí byť kladné číslo.");
+          return;
+        }
+        if (!popis.trim()) {
+            alert("Popis servisu nemôže byť prázdny.");
+            return;
+        }
+        if (!data[aktualneAuto].servis) {
+          data[aktualneAuto].servis = [];
+        }
+        data[aktualneAuto].servis.push({ datum, km, popis });
+        ulozData();
+        zobrazServis();
+        this.reset();
+      });
+
+      importTankovanieFile.addEventListener('change', (event) => importCSV('tankovania', event));
+      importServisFile.addEventListener('change', (event) => importCSV('servis', event));
+    }
+
+
+    function zobrazVyberAut() {
+      autoSelect.innerHTML = '';
+
+      const autaKeys = Object.keys(data);
+      if (autaKeys.length === 0) {
+        autoSelect.innerHTML = '<option value="" disabled selected>Pridajte auto</option>';
+      } else {
+        for (let auto of autaKeys) {
+          let opt = document.createElement('option');
+          opt.value = auto;
+          opt.textContent = auto;
+          if (auto === aktualneAuto) {
+            opt.selected = true;
+          }
+          autoSelect.appendChild(opt);
+        }
+        if (!autaKeys.includes(autoSelect.value) && autaKeys.length > 0) {
+             autoSelect.value = autaKeys[0];
+             aktualneAuto = autaKeys[0];
+             ulozData();
+        }
+      }
+    }
+
+    function zobrazZaznamy() {
+      if (!aktualneAuto || !data[aktualneAuto] || !data[aktualneAuto].tankovania) {
+        zaznamyBody.innerHTML = '<tr><td colspan="7" class="text-center">Vyberte alebo pridajte auto a pridajte záznamy.</td></tr>';
+        // Zničíme graf, ak nie sú žiadne dáta pre vybrané auto
+        if (spotrebaChartInstance) {
+            spotrebaChartInstance.destroy();
+            spotrebaChartInstance = null;
+        }
+        return;
+      }
+
+      zaznamyBody.innerHTML = '';
+      const zaznamy = data[aktualneAuto].tankovania;
+      zaznamy.sort((a, b) => new Date(a.datum) - new Date(b.datum));
+
+      if (zaznamy.length === 0) {
+          zaznamyBody.innerHTML = '<tr><td colspan="7" class="text-center">Žiadne záznamy tankovania.</td></tr>';
+          // Zničíme graf, ak nie sú žiadne záznamy
+          if (spotrebaChartInstance) {
+              spotrebaChartInstance.destroy();
+              spotrebaChartInstance = null;
+          }
+          return;
+      }
+
+      for (let i = 0; i < zaznamy.length; i++) {
+        const z = zaznamy[i];
+        let spotreba = '-';
+        if (i > 0) {
+          const predchadzajuciKm = zaznamy[i - 1].km;
+          const prejdenaVzdialenost = z.km - predchadzajuciKm;
+          if (prejdenaVzdialenost > 0) {
+            spotreba = ((z.litre / prejdenaVzdialenost) * 100).toFixed(2);
+          }
+        }
+        const row = zaznamyBody.insertRow();
+        row.innerHTML = `
+          <td>${z.datum}</td>
+          <td>${z.km}</td>
+          <td>${z.litre}</td>
+          <td>${z.cenaZaL ? z.cenaZaL.toFixed(3) : '-'}</td> <td>${z.cenaTankovania ? z.cenaTankovania : '-'}</td> <td>${spotreba}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="vymazZaznam('${aktualneAuto}', 'tankovania', ${i})">Zmazať</button></td>
+        `;
+      }
+      vykresliGrafSpotreby(zaznamy); // Zavoláme vykreslenie grafu po zobrazení tabuľky
+    }
+
+    function zobrazServis() {
+      if (!aktualneAuto || !data[aktualneAuto] || !data[aktualneAuto].servis) {
+        servisBody.innerHTML = '<tr><td colspan="4" class="text-center">Vyberte alebo pridajte auto a pridajte záznamy.</td></tr>';
+        return;
+      }
+
+      servisBody.innerHTML = '';
+      const zaznamy = data[aktualneAuto].servis;
+      zaznamy.sort((a, b) => new Date(b.datum) - new Date(a.datum));
+
+      if (zaznamy.length === 0) {
+          servisBody.innerHTML = '<tr><td colspan="4" class="text-center">Žiadne záznamy údržby.</td></tr>';
+          return;
+      }
+
+      for (let i = 0; i < zaznamy.length; i++) {
+        const z = zaznamy[i];
+        const row = servisBody.insertRow();
+        row.innerHTML = `
+          <td>${z.datum}</td>
+          <td>${z.km}</td>
+          <td>${z.popis}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="vymazZaznam('${aktualneAuto}', 'servis', ${i})">Zmazať</button></td>
+        `;
+      }
+    }
+
+    function vymazZaznam(auto, typ, index) {
+      if (confirm(`Naozaj chcete vymazať tento záznam?`)) {
+        if (data[auto] && data[auto][typ]) {
+          data[auto][typ].splice(index, 1);
+          ulozData();
+          if (typ === 'tankovania') {
+            zobrazZaznamy();
+          } else {
+            zobrazServis();
+          }
+        }
+      }
+    }
+
+    function pridatAuto() {
+      const meno = prompt("Zadaj názov nového auta:");
+      if (meno) {
+        const trimmedMeno = meno.trim();
+        if (trimmedMeno && !data[trimmedMeno]) {
+          data[trimmedMeno] = { tankovania: [], servis: [] };
+          aktualneAuto = trimmedMeno;
+          ulozData();
+          inicializujAplikaciu();
+          alert(`Auto '${trimmedMeno}' bolo pridané.`);
+        } else if (data[trimmedMeno]) {
+          alert("Auto s týmto názvom už existuje!");
+        } else {
+          alert("Názov auta nesmie byť prázdny.");
+        }
+      }
+    }
+
+    function spravaAut() {
+      if (!aktualneAuto || Object.keys(data).length === 0) {
+        alert("Najprv vyberte alebo pridajte auto.");
+        return;
+      }
+
+      let menu = '--- Správa vozidla ---\n';
+      menu += `Aktuálne auto: ${aktualneAuto}\n`;
+      menu += '1. Premenovať aktuálne auto\n';
+      menu += '2. Vymazať aktuálne auto\n';
+      menu += 'Pre zrušenie stlač ESC alebo Zrušiť.\n';
+      const vyber = prompt(menu);
+
+      if (vyber === '1') {
+        const noveMeno = prompt('Zadaj nový názov auta:');
+        if (noveMeno) {
+          const trimmedNoveMeno = noveMeno.trim();
+          if (trimmedNoveMeno && !data[trimmedNoveMeno]) {
+            data[trimmedNoveMeno] = data[aktualneAuto];
+            delete data[aktualneAuto];
+            aktualneAuto = trimmedNoveMeno;
+            ulozData();
+            inicializujAplikaciu();
+            alert(`Auto premenované na '${trimmedNoveMeno}'.`);
+          } else if (data[trimmedNoveMeno]) {
+            alert('Auto s týmto názvom už existuje.');
+          } else {
+            alert('Názov auta nesmie byť prázdny.');
+          }
+        }
+      } else if (vyber === '2') {
+        if (confirm(`Naozaj chceš vymazať auto '${aktualneAuto}' a všetky jeho záznamy?`)) {
+          delete data[aktualneAuto];
+          aktualneAuto = Object.keys(data)[0] || '';
+          ulozData();
+          inicializujAplikaciu();
+          alert(`Auto bolo vymazané.`);
+        }
+      }
+    }
+
+    function exportCSV(typ) {
+      if (!aktualneAuto || !data[aktualneAuto]) {
+        alert("Najprv vyberte auto na export.");
+        return;
+      }
+      const zaznamy = data[aktualneAuto][typ];
+      if (!zaznamy || zaznamy.length === 0) {
+        alert(`Žiadne záznamy typu '${typ}' na export pre aktuálne auto.`);
+        return;
+      }
+
+      let csv = '';
+      if (typ === 'tankovania') {
+        csv += 'Datum,Km,Litrov,Cena_za_L,Cena_tankovania_EUR,Spotreba_l_100km\n'; // Aktualizované hlavičky CSV
+        const sortedZaznamy = [...zaznamy].sort((a, b) => new Date(a.datum) - new Date(b.datum));
+        for (let i = 0; i < sortedZaznamy.length; i++) {
+          const z = sortedZaznamy[i];
+          let spotreba = '';
+          if (i > 0) {
+            const predchadzajuciKm = sortedZaznamy[i - 1].km;
+            const prejdenaVzdialenost = z.km - predchadzajuciKm;
+            if (prejdenaVzdialenost > 0) {
+              spotreba = ((z.litre / prejdenaVzdialenost) * 100).toFixed(2);
+            }
+          }
+          // Exportujeme aj cenaZaL a cenaTankovania, ak existujú
+          const cenaZaL = z.cenaZaL !== undefined ? z.cenaZaL : '';
+          const cenaTankovania = z.cenaTankovania !== undefined ? z.cenaTankovania : '';
+          csv += `${z.datum},${z.km},${z.litre},${cenaZaL},${cenaTankovania},${spotreba}\n`;
+        }
+      } else if (typ === 'servis') {
+        csv += 'Datum,Km,Popis\n';
+        zaznamy.forEach(z => {
+          csv += `${z.datum},${z.km},"${z.popis.replace(/"/g, '""')}"\n`;
+        });
+      }
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${aktualneAuto}_${typ}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function importCSV(typ, event) {
+      if (!aktualneAuto) {
+        alert("Najprv vyberte auto, do ktorého chcete importovať.");
+        event.target.value = '';
+        return;
+      }
+
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const text = e.target.result;
+        const lines = text.split('\n').filter(line => line.trim() !== '');
+        if (lines.length <= 1) {
+            alert("Súbor CSV neobsahuje žiadne platné dáta na import.");
+            event.target.value = '';
+            return;
+        }
+
+        const importedRecords = [];
+        for (let i = 1; i < lines.length; i++) {
+          const values = parseCSVLine(lines[i]);
+          if (values.length === 0) continue;
+
+          if (typ === 'tankovania') {
+            // Očakávame: Datum,Km,Litrov,Cena_za_L,Cena_tankovania_EUR,Spotreba_l_100km
+            if (values.length >= 4) { // Minimálne 4 stĺpce pre Datum, Km, Litre, Cena za L
+              const datum = values[0].trim();
+              const km = parseInt(values[1].trim());
+              const litre = parseFloat(values[2].trim());
+              const cenaZaL = parseFloat(values[3].trim()); // Importujeme cenu za liter
+
+              if (datum && !isNaN(km) && !isNaN(litre) && !isNaN(cenaZaL) && km >= 0 && litre >= 0 && cenaZaL >= 0) {
+                const cenaTankovania = (litre * cenaZaL).toFixed(2);
+                importedRecords.push({ datum, km, litre, cenaZaL, cenaTankovania });
+              } else {
+                console.warn(`Preskočený neplatný riadok tankovania: ${lines[i]}`);
+              }
+            }
+          } else if (typ === 'servis') {
+            if (values.length >= 3) {
+              const datum = values[0].trim();
+              const km = parseInt(values[1].trim());
+              const popis = values[2].trim();
+
+              if (datum && !isNaN(km) && km >= 0 && popis) {
+                importedRecords.push({ datum, km, popis });
+              } else {
+                console.warn(`Preskočený neplatný riadok servisu: ${lines[i]}`);
+              }
+            }
+          }
+        }
+
+        if (importedRecords.length === 0) {
+            alert("Žiadne platné záznamy neboli nájdené v súbore CSV.");
+            event.target.value = '';
+            return;
+        }
+
+        if (!data[aktualneAuto]) {
+            data[aktualneAuto] = { tankovania: [], servis: [] };
+        }
+        if (!data[aktualneAuto][typ]) {
+            data[aktualneAuto][typ] = [];
+        }
+
+        if (data[aktualneAuto][typ].length > 0) {
+            if (!confirm(`Súbor CSV obsahuje ${importedRecords.length} záznamov. Chcete ich pridať k existujúcim záznamom alebo ich prepísať? \n\nOK = Pridať\nZrušiť = Prepísať existujúce záznamy.`)) {
+                data[aktualneAuto][typ] = importedRecords;
+                alert(`Dáta boli prepísané ${importedRecords.length} záznamami.`);
+            } else {
+                data[aktualneAuto][typ] = data[aktualneAuto][typ].concat(importedRecords);
+                alert(`${importedRecords.length} záznamov bolo pridaných.`);
+            }
+        } else {
+            data[aktualneAuto][typ] = importedRecords;
+            alert(`${importedRecords.length} záznamov bolo úspešne importovaných.`);
+        }
+
+        ulozData();
+        if (typ === 'tankovania') {
+          zobrazZaznamy();
+        } else {
+          zobrazServis();
+        }
+        event.target.value = '';
+      };
+      reader.readAsText(file);
+    }
+
+    function parseCSVLine(line) {
+        const result = [];
+        let inQuote = false;
+        let currentField = '';
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            if (char === '"') {
+                if (inQuote && i + 1 < line.length && line[i + 1] === '"') {
+                    currentField += '"';
+                    i++;
+                } else {
+                    inQuote = !inQuote;
+                }
+            } else if (char === ',' && !inQuote) {
+                result.push(currentField.trim());
+                currentField = '';
+            } else {
+                currentField += char;
+            }
+        }
+        result.push(currentField.trim());
+        return result;
+    }
+
+    function resetData() {
+      if (confirm("Naozaj chcete vymazať VŠETKY uložené dáta pre VŠETKY autá? Táto akcia je nevratná!")) {
+        localStorage.clear();
+        data = {};
+        aktualneAuto = '';
+        inicializujAplikaciu();
+        alert("Všetky dáta boli resetované. Aplikácia je pripravená na pridanie nového auta.");
+      }
+    }
+
+    // --- Nová funkcia pre vykreslenie grafu spotreby ---
+    function vykresliGrafSpotreby(zaznamy) {
+        const ctx = document.getElementById('spotrebaChart').getContext('2d');
+
+        // Ak už existuje inštancia grafu, zničíme ju, aby sa neprekrývala
+        if (spotrebaChartInstance) {
+            spotrebaChartInstance.destroy();
+        }
+
+        // Ak je menej ako 2 záznamy, graf nemá zmysel
+        if (!zaznamy || zaznamy.length < 2) {
+            // Ak nemáme dostatok dát, môžeme zobraziť správu alebo len nechať plátno prázdne
+            // console.log("Nedostatok dát pre graf spotreby (potrebné aspoň 2 záznamy).");
+            spotrebaChartInstance = null; // Zabezpečíme, že inštancia je null
+            return;
+        }
+
+        // Dáta pre graf
+        const labels = [];
+        const spotrebaData = [];
+
+        // Prejdi záznamy a vypočítaj spotrebu
+        // Záznamy musia byť zoradené podľa dátumu pre správny výpočet spotreby
+        const sortedZaznamy = [...zaznamy].sort((a, b) => new Date(a.datum) - new Date(b.datum));
+
+        for (let i = 1; i < sortedZaznamy.length; i++) {
+            const predchadzajuci = sortedZaznamy[i - 1];
+            const aktualny = sortedZaznamy[i];
+
+            const prejdenaVzdialenost = aktualny.km - predchadzajuci.km;
+            const spotrebovaneLitre = aktualny.litre;
+
+            if (prejdenaVzdialenost > 0) {
+                const spotreba = (spotrebovaneLitre / prejdenaVzdialenost) * 100;
+                labels.push(aktualny.datum);
+                spotrebaData.push(spotreba.toFixed(2));
+            }
+        }
+
+        // Vytvorenie novej inštancie grafu
+        spotrebaChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Spotreba (l/100km)',
+                    data: spotrebaData,
+                    borderColor: 'rgb(75, 192, 192)',
+                    tension: 0.1,
+                    fill: false
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Graf vývoja spotreby'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Spotreba (l/100km)'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Dátum'
+                        }
+                    }
+                }
+            }
+        });
+    }
+  </script>
+</body>
+</html>
